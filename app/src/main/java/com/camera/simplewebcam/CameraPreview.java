@@ -8,6 +8,7 @@ import java.util.concurrent.Semaphore;
 import com.camera.simplewebcam.Main.takePicture;
 
 import android.content.Context;
+import android.graphics.Point;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
@@ -15,8 +16,10 @@ import android.os.Message;
 import android.os.MessageQueue.IdleHandler;
 import android.util.AttributeSet;
 import android.util.Log;
+import android.view.Display;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+import android.view.WindowManager;
 import android.widget.Toast;
 import android.graphics.Bitmap;
 import android.graphics.Bitmap.Config;
@@ -89,7 +92,6 @@ public class CameraPreview extends SurfaceView implements SurfaceHolder.Callback
 		
 		holder = getHolder();
 		holder.addCallback(this);
-		holder.setType(SurfaceHolder.SURFACE_TYPE_NORMAL);	
 	}
 	
     
@@ -102,13 +104,71 @@ public class CameraPreview extends SurfaceView implements SurfaceHolder.Callback
     	public VideoHandler(CameraPreview cp) {
     		mCp = cp;
 		}
-    	
+
 		@Override
 		public boolean queueIdle() {
+            /*
+            while(true &&
+                    !(handler.hasMessages(0)))
+            {
+                //Log.d("runnable","inside");
+                //obtaining display area to draw a large image
+                if(winWidth==0)
+                {
+                    winWidth=mCp.getWidth();
+                    winHeight=mCp.getHeight();
 
-			/*
-			 * loop in the idle queue unless there are new messages
-			 */
+                    if(winWidth*3/4<=winHeight)
+                    {
+                        scale_x = ((float)(dw+winWidth-1)/(float)CameraPreview.IMG_WIDTH);
+                        scale_y = ((float)(dh+winWidth*3/4-1)/(float)CameraPreview.IMG_HEIGHT);
+                    }
+                    else
+                    {
+                        scale_x = ((float)(dw+winHeight*4/3 -1)/(float)CameraPreview.IMG_WIDTH);
+                        scale_y = ((float)(dh+winHeight-1)/(float)CameraPreview.IMG_HEIGHT);
+                    }
+                    canvas_pos_scale.setScale(scale_x, scale_y);
+
+                    WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+                    Display display = wm.getDefaultDisplay();
+
+                    Point size = new Point();
+                    display.getSize(size);
+                    int width = size.x;
+                    pos_x = ( width - (float)CameraPreview.IMG_WIDTH * scale_x) / 2.0f;
+                }
+
+                Canvas canvas = getHolder().lockCanvas();
+                if (canvas != null)
+                {
+                    bmp.eraseColor( 0xFF00FF00 );
+
+                    mx_canvas.reset();
+                    // first apply flipping etc.
+                    mx_canvas.postConcat(mx);
+                    // second scale the image to fit the screen
+                    mx_canvas.postConcat(canvas_pos_scale);
+                    mx_canvas.postTranslate( pos_x, 0 );
+                    Log.d("canvas matrix",mx_canvas.toString());
+
+                    // draw camera bmp on canvas
+                    canvas.drawBitmap(bmp, mx_canvas, null);
+
+                    getHolder().unlockCanvasAndPost(canvas);
+                }
+                else
+                {
+                    Log.e("idleQueue","Canvas empty");
+                }
+
+                if(shouldStop){
+                    shouldStop = false;
+                }
+            }
+            */
+
+			//loop in the idle queue unless there are new messages
 			while(true && 
 				  (cameraExists || DEBUG)&& 
 				  !(handler.hasMessages(0))) 
@@ -131,9 +191,16 @@ public class CameraPreview extends SurfaceView implements SurfaceHolder.Callback
 	        			scale_y = ((float)(dh+winHeight-1)/(float)CameraPreview.IMG_HEIGHT);
 	        		}
 		        	canvas_pos_scale.setScale(scale_x, scale_y);
+
+                    WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+                    Display display = wm.getDefaultDisplay();
+
+                    Point size = new Point();
+                    display.getSize(size);
+                    int width = size.x;
+                    pos_x = ( width - (float)CameraPreview.IMG_WIDTH * scale_x) / 2.0f;
 	        	}
-	        	
-	        	
+
 	            Canvas canvas = getHolder().lockCanvas();
 	            if (canvas != null)
 	            {
@@ -155,6 +222,7 @@ public class CameraPreview extends SurfaceView implements SurfaceHolder.Callback
 	            	mx_canvas.postConcat(mx);
 	            	// second scale the image to fit the screen
 	            	mx_canvas.postConcat(canvas_pos_scale);
+                    mx_canvas.postTranslate( 100, 0 );
 	        		Log.d("canvas matrix",mx_canvas.toString());
 
 	            	// draw camera bmp on canvas
@@ -171,11 +239,11 @@ public class CameraPreview extends SurfaceView implements SurfaceHolder.Callback
 	            	shouldStop = false;  
 	            }	        
 	        }
-			 
+
 			return true;
 		}
     }
-    
+
     @Override
     public void run() {
     	
@@ -229,19 +297,56 @@ public class CameraPreview extends SurfaceView implements SurfaceHolder.Callback
 		Looper.loop();
     }
 
+    public void detectCamera()
+    {
+        Thread detectThread = new Thread() {
+            public void run() {
+                int ret = -1;
+                int camID = 0;
+                int camBase = cameraBase;
+                do {
+                    try {
+                        Thread.sleep(2000);
+                    } catch (InterruptedException e) {
+                        // TODO Auto-generated catch block
+                        e.printStackTrace();
+                    }
+                    ret = prepareCameraWithBase(camID, camBase);
+
+                    camID++;
+                    if ( camID == cameraId + 1 ){
+                        if ( camBase == 0 )
+                            camBase = 4;
+                        else
+                            camBase = 0;
+                    }
+                    camID = camID % (cameraId+1);
+                }while ( ret == -1 );
+                cameraExists = (ret!=-1);
+                mainLoop = new Thread(this);
+                mainLoop.start();
+            }
+        };
+        detectThread.start();
+    }
+
 	@Override
 	public void surfaceCreated(SurfaceHolder holder) {
 		if(DEBUG) Log.d("WebCam", "surfaceCreated");
 		if(bmp==null){
 			bmp = Bitmap.createBitmap(IMG_WIDTH, IMG_HEIGHT, Bitmap.Config.ARGB_8888);
+            bmp.eraseColor(0xFF00FF00);
 		}
+        detectCamera();
+        /*
 		// /dev/videox (x=cameraId + cameraBase) is used
 		int ret = prepareCameraWithBase(cameraId, cameraBase);
 		
 		if(ret!=-1) cameraExists = true;
 		
         mainLoop = new Thread(this);
-        mainLoop.start();		
+        mainLoop.start();
+        */
 	}
 	
 	@Override
